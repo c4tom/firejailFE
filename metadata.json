@@ -1,0 +1,8 @@
+{
+  "name": "FirejailFE",
+  "description": "Interface web completa para configurar as opções do Firejail, gerenciar perfis de isolamento, ajustar permissões e monitorar logs em tempo real.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
