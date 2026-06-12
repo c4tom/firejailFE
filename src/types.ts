@@ -11,6 +11,7 @@ export interface FirejailProfile {
   arguments: string;
   icon?: string;
   isPreset?: boolean;
+  customRawText?: string;
 
   // General & Execution
   sandboxName?: string;

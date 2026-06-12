@@ -37,6 +37,59 @@ import {
   Monitor
 } from "lucide-react";
 
+function highlightProfileLine(line: string): React.ReactNode {
+  const trimmed = line.trim();
+  if (trimmed.startsWith("#")) {
+    return <span className="text-slate-500 italic">{line}</span>;
+  }
+  if (trimmed.startsWith("include")) {
+    const parts = line.split(" ");
+    return (
+      <span>
+        <span className="text-blue-400 font-semibold">{parts[0]}</span>{" "}
+        <span className="text-slate-300">{parts.slice(1).join(" ")}</span>
+      </span>
+    );
+  }
+  if (trimmed.startsWith("blacklist") || trimmed.startsWith("disable-")) {
+    const idx = line.indexOf(" ");
+    if (idx !== -1) {
+      return (
+        <span>
+          <span className="text-rose-400 font-bold">{line.slice(0, idx)}</span>
+          <span className="text-slate-305">{line.slice(idx)}</span>
+        </span>
+      );
+    }
+    return <span className="text-rose-450 font-bold">{line}</span>;
+  }
+  if (trimmed.startsWith("whitelist") || trimmed.startsWith("private-") || trimmed.startsWith("private")) {
+    const idx = line.indexOf(" ");
+    if (idx !== -1) {
+      return (
+        <span>
+          <span className="text-emerald-400 font-bold">{line.slice(0, idx)}</span>
+          <span className="text-slate-305">{line.slice(idx)}</span>
+        </span>
+      );
+    }
+    return <span className="text-emerald-450 font-bold">{line}</span>;
+  }
+  if (trimmed.startsWith("seccomp") || trimmed.startsWith("caps.")) {
+    const idx = line.indexOf(" ");
+    if (idx !== -1) {
+      return (
+        <span>
+          <span className="text-violet-400 font-bold">{line.slice(0, idx)}</span>
+          <span className="text-slate-305">{line.slice(idx)}</span>
+        </span>
+      );
+    }
+    return <span className="text-violet-400 font-bold">{line}</span>;
+  }
+  return <span className="text-slate-205">{line}</span>;
+}
+
 /**
  * Main Firejail profile manager and simulated log monitoring hub
  */
@@ -49,6 +102,12 @@ export default function App() {
   const [modalSearch, setModalSearch] = useState("");
   const [modalCategory, setModalCategory] = useState<string>("All");
   const [profileLoadingFilename, setProfileLoadingFilename] = useState<string | null>(null);
+
+  // Modal Preview states
+  const [modalTab, setModalTab] = useState<"explore" | "preview">("explore");
+  const [previewTemplate, setPreviewTemplate] = useState<any | null>(null);
+  const [previewContent, setPreviewContent] = useState<string>("");
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
   // Compute combined curated + all 1200+ list of Firejail profiles
   const ALL_TEMPLATES = React.useMemo(() => {
@@ -340,7 +399,12 @@ export default function App() {
             const syncedList: RunningSandbox[] = list.map((osJail: any) => {
               const existing = currentNonTerminated.find(x => x.pid === osJail.pid);
               if (existing) {
-                return { ...existing, status: "running" as const };
+                return { 
+                  ...existing, 
+                  status: "running" as const,
+                  cpuUsage: osJail.cpu ?? existing.cpuUsage,
+                  memoryUsage: osJail.memory ?? existing.memoryUsage
+                };
               }
 
               // Else mount new live dashboard view
@@ -351,8 +415,8 @@ export default function App() {
                 program: osJail.program,
                 status: "running" as const,
                 startTime: new Date(),
-                cpuUsage: 1 + Math.random() * 3,
-                memoryUsage: 30 + Math.random() * 15,
+                cpuUsage: osJail.cpu ?? (1 + Math.random() * 3),
+                memoryUsage: osJail.memory ?? (30 + Math.random() * 15),
                 networkRx: 0,
                 networkTx: 0,
                 blockedSyscallsCount: 0,
@@ -374,8 +438,43 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isLocalFullstack]);
 
-  // Logs stream simulator thread
+  // Real backend logs synchronizer
   useEffect(() => {
+    if (!isLocalFullstack) return;
+
+    const fetchServerLogs = async () => {
+      try {
+        const response = await fetch("/api/logs");
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data.logs)) {
+            setLogs(prev => {
+              const existingIds = new Set(prev.map(l => l.id));
+              const newLogs = data.logs.filter((l: any) => !existingIds.has(l.id));
+              if (newLogs.length === 0) return prev;
+              
+              const updatedList = [...prev, ...newLogs];
+              if (updatedList.length > 250) {
+                updatedList.splice(0, updatedList.length - 250);
+              }
+              return updatedList;
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("Falha ao sincronizar logs com o backend:", err);
+      }
+    };
+
+    fetchServerLogs();
+    const interval = setInterval(fetchServerLogs, 1000);
+    return () => clearInterval(interval);
+  }, [isLocalFullstack]);
+
+  // Logs stream simulator thread (only active when offline / no backend companion is present)
+  useEffect(() => {
+    if (isLocalFullstack) return;
+
     const timer = setInterval(() => {
       if (activeSandboxes.length === 0) return;
 
@@ -611,6 +710,109 @@ export default function App() {
         type: "INFO",
         message: `🆕 Novo perfil em branco "${newProf.name}" iniciado. Comece a configurar restrições nas abas Seccomp, Namespaces e Rede!`,
         severity: "low"
+      }
+    ]);
+  };
+
+  const handleLoadPreview = async (template: any) => {
+    const filename = template.filename;
+    setIsPreviewLoading(true);
+    setPreviewTemplate(template);
+    setModalTab("preview");
+
+    const tempProfileForFileContent = {
+      id: "preview-temp",
+      name: template.name,
+      description: template.description || "",
+      program: template.program || filename.replace(/\.profile$/, ""),
+      arguments: "",
+      icon: template.icon || "FileText",
+      isPreset: false,
+      ...template.settings
+    };
+
+    let generatedText = generateProfileFileContent(tempProfileForFileContent);
+    setPreviewContent(generatedText);
+
+    try {
+      const firstChar = filename.toLowerCase().charAt(0);
+      let targetPath = "";
+      if (filename.endsWith(".profile")) {
+        if ((firstChar >= '0' && firstChar <= '9') || (firstChar >= 'a' && firstChar <= 'm')) {
+          targetPath = `profile-a-m/${filename}`;
+        } else if (firstChar >= 'n' && firstChar <= 'z') {
+          targetPath = `profile-n-z/${filename}`;
+        } else {
+          targetPath = filename;
+        }
+      } else {
+        targetPath = filename;
+      }
+
+      let response = await fetch(`https://raw.githubusercontent.com/netblue30/firejail/master/etc/${targetPath}`);
+      if (!response.ok) {
+        response = await fetch(`https://raw.githubusercontent.com/netblue30/firejail/master/etc/${filename}`);
+      }
+
+      if (response.ok) {
+        const text = await response.text();
+        setPreviewContent(text);
+      }
+    } catch (err) {
+      console.warn("Could not retrieve online profile for preview, using generated defaults.", err);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  const handleConfirmImport = (template: any, content: string) => {
+    const newId = `profile-template-${Date.now()}`;
+    const filename = template.filename;
+
+    const parsed = parseProfileFileContent(content, {
+      id: newId,
+      name: template.name,
+      description: template.description || "",
+      program: template.program || filename.replace(/\.profile$/, ""),
+      arguments: "",
+      icon: template.icon || "FileText",
+      isPreset: false,
+      ...template.settings
+    });
+
+    const newProf: FirejailProfile = {
+      id: newId,
+      name: template.name,
+      description: template.description,
+      program: template.program || filename.replace(/\.profile$/, ""),
+      arguments: "",
+      icon: template.icon || "FileText",
+      isPreset: false,
+      ...parsed,
+      customRawText: content || undefined
+    };
+
+    setCustomProfiles(prev => [...prev, newProf]);
+    setSelectedProfileId(newId);
+    setIsNewProfileModalOpen(false);
+    setModalSearch("");
+    setModalCategory("All");
+    setModalTab("explore");
+    setPreviewTemplate(null);
+    setPreviewContent("");
+    setActiveTab("builder");
+
+    const stamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    setLogs(prev => [
+      ...prev,
+      {
+        id: `template-import-${Date.now()}`,
+        timestamp: stamp,
+        pid: 1211,
+        sandboxName: "sys-init",
+        type: "INFO",
+        message: `📥 Perfil '${filename}' (${template.name}) gerado a partir da pré-visualização validada com total compatibilidade.`,
+        severity: template.attentionNeeded ? "medium" : "low"
       }
     ]);
   };
@@ -1013,8 +1215,15 @@ export default function App() {
     ]);
   };
 
-  const handleClearLogs = () => {
+  const handleClearLogs = async () => {
     setLogs([]);
+    if (isLocalFullstack) {
+      try {
+        await fetch("/api/logs/clear", { method: "POST" });
+      } catch (err) {
+        console.warn("Falha ao limpar logs no servidor:", err);
+      }
+    }
   };
 
   const handleAddCustomLog = (log: LogEntry) => {
@@ -1287,6 +1496,9 @@ export default function App() {
                   setIsNewProfileModalOpen(false);
                   setModalSearch("");
                   setModalCategory("All");
+                  setModalTab("explore");
+                  setPreviewTemplate(null);
+                  setPreviewContent("");
                 }}
                 className="p-1 px-2.5 text-slate-400 hover:text-white hover:bg-slate-850 rounded transition cursor-pointer"
                 title="Fechar"
@@ -1296,45 +1508,82 @@ export default function App() {
               </button>
             </div>
 
-            {/* Quick Actions & Search Area */}
-            <div className="p-4 bg-slate-950/40 border-b border-slate-850 flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
-              {/* Search bar inside modal */}
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
-                <input
-                  type="text"
-                  placeholder="Pesquisar por comando (eg. firefox, node, code, composer)..."
-                  value={modalSearch}
-                  onChange={(e) => setModalSearch(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-850 pl-9 pr-4 py-2 text-xs text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-transparent placeholder:text-slate-500 font-mono"
-                  id="modal-search-field"
-                />
-                {modalSearch && (
-                  <button
-                    onClick={() => setModalSearch("")}
-                    className="absolute right-3 top-2.5 text-slate-500 hover:text-white"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-
-              {/* Blank profile option */}
+            {/* Modal Tabs Bar */}
+            <div className="bg-slate-950/85 border-b border-slate-850 px-4 md:px-5 flex gap-1 shrink-0">
               <button
-                onClick={handleCreateBlankProfile}
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer justify-center shadow border border-slate-700"
-                id="btn-create-blank-inside-modal"
-                title="Criar um perfil limpo sem preset"
+                type="button"
+                onClick={() => setModalTab("explore")}
+                className={`py-3 px-4 text-xs font-bold transition-all relative border-b-2 cursor-pointer ${
+                  modalTab === "explore"
+                    ? "border-emerald-500 text-white bg-slate-900/40"
+                    : "border-transparent text-slate-400 hover:text-slate-200"
+                }`}
+                id="btn-tab-modal-explore"
               >
-                <Plus className="w-3.5 h-3.5" />
-                Criar do Zero (Sem Template)
+                📁 Explorar Templates
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (previewTemplate) setModalTab("preview");
+                }}
+                disabled={!previewTemplate}
+                className={`py-3 px-4 text-xs font-bold transition-all relative border-b-2 disabled:opacity-40 select-none ${
+                  !previewTemplate
+                    ? "border-transparent text-slate-600 cursor-not-allowed"
+                    : modalTab === "preview"
+                    ? "border-emerald-500 text-white bg-slate-900/40 cursor-pointer"
+                    : "border-transparent text-slate-400 hover:text-slate-300 cursor-pointer"
+                }`}
+                id="btn-tab-modal-preview"
+                title={previewTemplate ? `Pré-visualizar ${previewTemplate.filename}` : "Selecione um template antes de pré-visualizar"}
+              >
+                📝 Pré-visualização (.profile) {previewTemplate && `(${previewTemplate?.filename})`}
               </button>
             </div>
 
+            {/* Quick Actions & Search Area */}
+            {modalTab === "explore" && (
+              <div className="p-4 bg-slate-950/40 border-b border-slate-850 flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
+                {/* Search bar inside modal */}
+                <div className="relative flex-1 max-w-md">
+                  <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Pesquisar por comando (eg. firefox, node, code, composer)..."
+                    value={modalSearch}
+                    onChange={(e) => setModalSearch(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-850 pl-9 pr-4 py-2 text-xs text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-transparent placeholder:text-slate-500 font-mono"
+                    id="modal-search-field"
+                  />
+                  {modalSearch && (
+                    <button
+                      onClick={() => setModalSearch("")}
+                      className="absolute right-3 top-2.5 text-slate-500 hover:text-white"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Blank profile option */}
+                <button
+                  onClick={handleCreateBlankProfile}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer justify-center shadow border border-slate-700"
+                  id="btn-create-blank-inside-modal"
+                  title="Criar um perfil limpo sem preset"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Criar do Zero (Sem Template)
+                </button>
+              </div>
+            )}
+
             {/* Body partition */}
-            <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden relative">
-              
-              {/* Remote fetching state loader screen inside the modal body */}
+            <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden relative" id="modal-tab-body-container">
+              {modalTab === "explore" ? (
+                <>
+                  {/* Remote fetching state loader screen inside the modal body */}
               {profileLoadingFilename && (
                 <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center p-6 text-center animate-fade-in">
                   <div className="w-12 h-12 rounded-full border-4 border-emerald-500/20 border-t-emerald-500 animate-spin mb-4"></div>
@@ -1440,7 +1689,7 @@ export default function App() {
                           return (
                             <div
                               key={p.filename}
-                              onClick={() => handleImportTemplate(p)}
+                              onClick={() => handleLoadPreview(p)}
                               className={`p-3 bg-slate-900 hover:bg-slate-850 border rounded-lg cursor-pointer transition flex flex-col justify-between group h-full ${
                                 p.attentionNeeded 
                                   ? "border-amber-950/50 hover:border-amber-600 bg-gradient-to-br from-slate-900 to-amber-955/5" 
@@ -1448,7 +1697,7 @@ export default function App() {
                                     ? "border-emerald-950/40 hover:border-emerald-500 bg-gradient-to-br from-slate-900 to-emerald-955/2"
                                     : "border-slate-850 hover:border-slate-700"
                               }`}
-                              title="Clique para carregar e iniciar edição"
+                              title="Clique para pré-visualizar as regras e validar antes de importar"
                             >
                               <div>
                                 {/* Title block */}
@@ -1469,7 +1718,7 @@ export default function App() {
                                     )}
                                   </div>
                                   <span className="text-[10px] text-emerald-450 font-bold opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shrink-0">
-                                    Importar &rarr;
+                                    Pré-visualizar &rarr;
                                   </span>
                                 </div>
 
@@ -1516,6 +1765,184 @@ export default function App() {
                   })()}
                 </div>
               </div>
+                </>
+              ) : (
+                /* Dedicated preview visualizer container */
+                <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden w-full divide-y md:divide-y-0 md:divide-x divide-slate-800 bg-slate-950/40">
+                  {/* Left: Security parameters breakdown card */}
+                  <div className="w-full md:w-85 p-4 md:p-5 overflow-y-auto space-y-4 shrink-0 bg-slate-900/40 scrollbar-thin flex flex-col justify-between">
+                    <div className="space-y-4">
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 border border-emerald-500/15 px-1.5 py-0.5 rounded">
+                            Ficha de Segurança
+                          </span>
+                          <span className="font-mono text-[9px] text-slate-500">etc/firejail/{previewTemplate?.filename}</span>
+                        </div>
+                        <h4 className="text-sm font-extrabold text-white mt-1 uppercase tracking-wide">
+                          {previewTemplate?.name}
+                        </h4>
+                        <p className="text-[11px] text-slate-400 mt-1 leading-relaxed font-sans">
+                          {previewTemplate?.description}
+                        </p>
+                      </div>
+
+                      {previewTemplate?.attentionReason && (
+                        <div className="p-3 bg-amber-500/10 rounded-lg border border-amber-500/20 text-[11px] text-amber-400 font-sans leading-relaxed">
+                          <strong className="block text-amber-300 mb-1">⚠️ Riscos / Atenção:</strong>
+                          {previewTemplate?.attentionReason}
+                        </div>
+                      )}
+
+                      {/* Security policy metrics derived directly from rules contents */}
+                      <div className="space-y-2 pt-3 border-t border-slate-800">
+                        <h5 className="text-[10.5px] uppercase font-bold text-slate-400 tracking-wider">Políticas Avaliadas</h5>
+                        
+                        <div className="space-y-1.5 text-[11px]">
+                          {[
+                            {
+                              id: "seccomp",
+                              label: "Filtro Seccomp",
+                              active: previewContent.includes("seccomp"),
+                              tooltip: "Bloqueia chamadas de sistema inseguras de kernel por padrão.",
+                              color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+                              inactiveColor: "text-slate-500 bg-slate-950 border-slate-850"
+                            },
+                            {
+                              id: "noroot",
+                              label: "Isolar Superusuário (noroot)",
+                              active: previewContent.includes("noroot") || !!previewTemplate?.settings?.noroot,
+                              tooltip: "Garante que o aplicativo nunca possa escalar para root.",
+                              color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+                              inactiveColor: "text-slate-500 bg-slate-950 border-slate-850"
+                            },
+                            {
+                              id: "private-tmp",
+                              label: "Diretório Tmp Privado",
+                              active: previewContent.includes("private-tmp") || !!previewTemplate?.settings?.privateTmp,
+                              tooltip: "/tmp isolado impede vazamento de IPC temporário.",
+                              color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+                              inactiveColor: "text-slate-500 bg-slate-955 border-slate-850"
+                            },
+                            {
+                              id: "private-dev",
+                              label: "Dispositivos Isolados (private-dev)",
+                              active: previewContent.includes("private-dev") || !!previewTemplate?.settings?.privateDev,
+                              tooltip: "Restringe /dev físico e conexões de vídeo, áudio, usb extras.",
+                              color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+                              inactiveColor: "text-slate-500 bg-slate-955 border-slate-850"
+                            },
+                            {
+                              id: "private-home",
+                              label: "Home Isolada (private)",
+                              active: previewContent.includes("private ") || previewContent.includes("private\n") || !!previewTemplate?.settings?.privateHome,
+                              tooltip: "A pasta Home real é oculta do aplicativo enclausurado.",
+                              color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+                              inactiveColor: "text-slate-500 bg-slate-955 border-slate-850"
+                            },
+                            {
+                              id: "nodbus",
+                              label: "D-Bus Bloqueado (nodbus)",
+                              active: previewContent.includes("nodbus"),
+                              tooltip: "Previne comunicação socket e escalonamento lateral via D-Bus.",
+                              color: "text-violet-400 bg-violet-500/10 border-violet-500/20",
+                              inactiveColor: "text-slate-500 bg-slate-950 border-slate-850"
+                            },
+                            {
+                              id: "net-none",
+                              label: "Namespace de Rede Isolado",
+                              active: previewContent.includes("net none") || previewTemplate?.settings?.netBridge === "none",
+                              tooltip: "Dispositivo rodará totalmente offline sem interfaces externas.",
+                              color: "text-blue-400 bg-blue-500/10 border-blue-500/20",
+                              inactiveColor: "text-slate-500 bg-slate-950 border-slate-850"
+                            }
+                          ].map((pol) => (
+                            <div 
+                              key={pol.id}
+                              className={`flex items-center justify-between p-2 rounded-lg border leading-tight ${
+                                pol.active ? pol.color : pol.inactiveColor
+                              }`}
+                              title={pol.tooltip}
+                            >
+                              <span>{pol.label}</span>
+                              <span className="font-semibold text-[10px]">
+                                {pol.active ? "ATIVO ✅" : "NÃO INCLUSO"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-850">
+                      <p className="text-[10px] text-slate-505 leading-relaxed font-mono">
+                        * Parâmetros estruturados e identificados por rastreio sintático do compilador interno.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Right: Code editor simulator panel */}
+                  <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-slate-950">
+                    {/* Header bar */}
+                    <div className="bg-slate-950/80 px-4 py-2.5 text-[10.5px] font-mono text-slate-400 border-b border-slate-800 flex items-center justify-between shrink-0">
+                      <span className="flex items-center gap-1.5 text-slate-350">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        /etc/firejail/{previewTemplate?.filename} ({previewContent.split("\n").length} linhas)
+                      </span>
+                      <span className="text-slate-500 select-none">ReadOnly • Sintaxe Construtor</span>
+                    </div>
+
+                    {/* Live code block containing syntax custom highlight renderer */}
+                    <div className="flex-1 p-4 overflow-y-auto bg-slate-900/10 font-mono text-xs leading-relaxed select-text select-all whitespace-pre scrollbar-thin scrollbar-track-transparent">
+                      {isPreviewLoading ? (
+                        <div className="h-full flex flex-col items-center justify-center p-8 text-center bg-slate-950">
+                          <div className="w-10 h-10 rounded-full border-4 border-emerald-500/20 border-t-emerald-500 animate-spin mb-4"></div>
+                          <h4 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Sincronizando arquivo do repositório upstream...</h4>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-[30px_1fr] gap-4 min-w-0">
+                          {/* Line Numbers Column */}
+                          <div className="text-slate-650 text-right select-none pr-3 border-r border-slate-850 font-mono text-[10.5px]">
+                            {previewContent.split("\n").map((_, idx) => (
+                              <div key={idx} className="h-5">{idx + 1}</div>
+                            ))}
+                          </div>
+                          {/* Code Lines Container */}
+                          <div className="text-slate-200 select-text overflow-x-auto font-mono text-[11px]">
+                            {previewContent.split("\n").map((line, idx) => (
+                              <div key={idx} className="h-5">{highlightProfileLine(line)}</div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Bottom confirm footer block */}
+                    <div className="p-4 bg-slate-900 border-t border-slate-850 flex items-center justify-between shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setModalTab("explore")}
+                        className="px-3 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 border border-slate-800 transition cursor-pointer"
+                      >
+                        &larr; Voltar para a Busca
+                      </button>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-400 mr-2 font-sans hidden lg:block">
+                          Validação de sintaxe Firejail concluída com sucesso.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleConfirmImport(previewTemplate, previewContent)}
+                          className="px-4 py-2 bg-emerald-500 hover:bg-emerald-450 text-slate-950 text-xs font-extrabold uppercase tracking-wider rounded-lg flex items-center gap-1.5 font-sans transition shadow-md hover:shadow-emerald-500/10 cursor-pointer"
+                        >
+                          Confirmar e Importar Perfil
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

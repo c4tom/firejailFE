@@ -719,192 +719,395 @@ export default function ProfileForm({ profile, onChange, onSave, onStartSandbox 
             )}
 
             {/* NETWORK TAB */}
-            {activeTab === "network" && (
-              <div className="space-y-4">
-                <div className="border border-slate-800 bg-slate-950/50 p-4 rounded-lg space-y-4">
-                  <h3 className="text-slate-200 text-xs font-bold uppercase tracking-wider pb-1 border-b border-slate-900 flex items-center justify-between">
-                    <span>Politicas de Namespace de Rede</span>
-                    <Wifi className="w-3.5 h-3.5 text-emerald-400" />
-                  </h3>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1">
-                        Interface de Rede / Ponte (<span className="font-mono">--net=interface</span>)
-                      </label>
-                      <select
-                        value={profile.netBridge || ""}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          updateField("netBridge", val);
-                          if (val === "none") {
-                            updateField("ipAddress", "none");
-                          } else if (profile.ipAddress === "none") {
-                            updateField("ipAddress", "");
-                          }
-                        }}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                      >
-                        <option value="">Compartilhar rede com o Host (Vulnerabilidade Padrão)</option>
-                        <option value="none">Isolamento Completo (Sem rede - --net=none)</option>
-                        <option value="br0">Ponte Virtual br0</option>
-                        <option value="docker0">Ponte Virtual docker0</option>
-                        <option value="eth0">Interface Ethernet Principal (eth0)</option>
-                        <option value="wlan0">Interface Sem Fio (wlan0)</option>
-                      </select>
-                    </div>
+            {activeTab === "network" && (() => {
+              const currentNetMode = profile.netBridge === "none" ? "none" : (profile.netBridge ? "bridge" : "host");
+              
+              const handleSelectNetMode = (mode: "none" | "bridge" | "host") => {
+                if (mode === "none") {
+                  onChange({
+                    ...profile,
+                    netBridge: "none",
+                    ipAddress: "none"
+                  });
+                } else if (mode === "host") {
+                  onChange({
+                    ...profile,
+                    netBridge: "",
+                    ipAddress: ""
+                  });
+                } else {
+                  onChange({
+                    ...profile,
+                    netBridge: "br0",
+                    ipAddress: ""
+                  });
+                }
+              };
 
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1">
-                        Atribuição de IP (<span className="font-mono">--ip=address</span>)
-                      </label>
-                      <select
-                        value={profile.ipAddress || ""}
-                        onChange={(e) => updateField("ipAddress", e.target.value)}
-                        disabled={profile.netBridge === "none"}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
-                      >
-                        <option value="">Automático</option>
-                        <option value="dhcp">DHCP Automático (--ip=dhcp)</option>
-                        <option value="192.168.1.100">IP Estático Customizado (192.168.1.100)</option>
-                        <option value="none" disabled={profile.netBridge !== "none"}>Nenhum IP (--ip=none)</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* DNS Servers */}
-                  <div className="bg-slate-950/60 p-4 border border-slate-800 rounded-lg">
-                    <h3 className="text-slate-200 text-xs font-bold uppercase tracking-wider mb-2 flex items-center justify-between">
-                      <span>Servidores DNS Customizados (<span className="font-mono">--dns</span>)</span>
+              return (
+                <div className="space-y-4 animate-fade-in">
+                  {/* Primary Net-Namespace Panel */}
+                  <div className="border border-slate-800 bg-slate-950/50 p-4 rounded-lg space-y-4">
+                    <h3 className="text-slate-200 text-xs font-bold uppercase tracking-wider pb-1 border-b border-slate-900 flex items-center justify-between">
+                      <span>Configuração do Namespace de Rede (Net-Namespace)</span>
+                      <Wifi className="w-3.5 h-3.5 text-emerald-400" />
                     </h3>
-                    <div className="flex gap-2 mb-3">
-                      <input
-                        type="text"
-                        value={newDns}
-                        onChange={(e) => setNewDns(e.target.value)}
-                        placeholder="Ex: 8.8.8.8, 1.1.1.1"
-                        className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                        onKeyDown={(e) => e.key === "Enter" && handleAddListItem("dnsServers", profile.dnsServers, newDns, () => setNewDns(""))}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleAddListItem("dnsServers", profile.dnsServers, newDns, () => setNewDns(""))}
-                        className="px-2 py-1 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-white"
+
+                    {/* Highly aesthetic toggle group card layout */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {/* HOST MODE */}
+                      <div 
+                        onClick={() => handleSelectNetMode("host")}
+                        className={`p-3.5 rounded-xl border cursor-pointer transition select-none flex flex-col justify-between ${
+                          currentNetMode === "host"
+                            ? "bg-slate-900/80 border-amber-500/50 shadow-lg shadow-amber-950/10"
+                            : "bg-slate-950/30 border-slate-850 hover:border-slate-800"
+                        }`}
                       >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold text-slate-100">Compartilhar Host</span>
+                            <span className="px-1.5 py-0.5 text-[9px] font-mono bg-amber-500/10 text-amber-400 rounded border border-amber-500/20">--net=host</span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 leading-relaxed">
+                            O app compartilha a interface e a tabela de rotas do hospedeiro. Padrão para navegadores e utilitários que herdam o Wi-Fi local sem limites.
+                          </p>
+                        </div>
+                        <div className="mt-4 flex items-center justify-between pt-2 border-t border-slate-900">
+                          <span className="text-[10px] text-amber-400/80 font-semibold font-mono">Sem Isolamento</span>
+                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                            currentNetMode === "host" ? "border-amber-500 bg-amber-500/25" : "border-slate-700"
+                          }`}>
+                            {currentNetMode === "host" && <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* NONE MODE */}
+                      <div 
+                        onClick={() => handleSelectNetMode("none")}
+                        className={`p-3.5 rounded-xl border cursor-pointer transition select-none flex flex-col justify-between ${
+                          currentNetMode === "none"
+                            ? "bg-slate-900/80 border-emerald-500/50 shadow-lg shadow-emerald-950/10"
+                            : "bg-slate-950/30 border-slate-850 hover:border-slate-800"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold text-slate-100">Isolamento Total</span>
+                            <span className="px-1.5 py-0.5 text-[9px] font-mono bg-emerald-500/10 text-emerald-400 rounded border border-emerald-500/20">--net=none</span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 leading-relaxed">
+                            Cria um namespace contendo apenas a interface de loopback desativando qualquer soquete externo. Ideal para aplicativos offline.
+                          </p>
+                        </div>
+                        <div className="mt-4 flex items-center justify-between pt-2 border-t border-slate-900">
+                          <span className="text-[10px] text-emerald-400/85 font-semibold font-mono">Segurança Máxima</span>
+                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                            currentNetMode === "none" ? "border-emerald-500 bg-emerald-500/25" : "border-slate-700"
+                          }`}>
+                            {currentNetMode === "none" && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* BRIDGE MODE */}
+                      <div 
+                        onClick={() => handleSelectNetMode("bridge")}
+                        className={`p-3.5 rounded-xl border cursor-pointer transition select-none flex flex-col justify-between ${
+                          currentNetMode === "bridge"
+                            ? "bg-slate-900/80 border-blue-500/50 shadow-lg shadow-blue-950/10"
+                            : "bg-slate-950/30 border-slate-850 hover:border-slate-800"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold text-slate-100">Ponte Virtual</span>
+                            <span className="px-1.5 py-0.5 text-[9px] font-mono bg-blue-500/10 text-blue-400 rounded border border-blue-500/20">--net=interface</span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 leading-relaxed">
+                            Encaminha as conexões através de pontes compartilhadas no kernel (ex: docker0, br0). Protege contra escuta ARP e sniffs do host.
+                          </p>
+                        </div>
+                        <div className="mt-4 flex items-center justify-between pt-2 border-t border-slate-900">
+                          <span className="text-[10px] text-blue-400/85 font-semibold font-mono">Subrede Isolada</span>
+                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                            currentNetMode === "bridge" ? "border-blue-500 bg-blue-500/25" : "border-slate-700"
+                          }`}>
+                            {currentNetMode === "bridge" && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="space-y-1 max-h-32 overflow-y-auto">
-                      {(profile.dnsServers || []).map((dns, idx) => (
-                        <div key={idx} className="flex justify-between items-center bg-slate-900 border border-slate-850 px-2 py-1 rounded text-xs font-mono">
-                          <span className="text-slate-300">{dns}</span>
+
+                    {/* Sub-parameters based on selection */}
+                    {currentNetMode === "bridge" && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-900 animate-fade-in">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
+                            Interface de Rede / Ponte (<span className="font-mono">--net=interface</span>)
+                          </label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={profile.netBridge === "none" ? "br0" : (profile.netBridge || "br0")}
+                              onChange={(e) => updateField("netBridge", e.target.value)}
+                              placeholder="Ex: br0, docker0, eth0"
+                              className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                            />
+                            <select
+                              value={profile.netBridge && profile.netBridge !== "none" ? profile.netBridge : ""}
+                              onChange={(e) => {
+                                if (e.target.value) updateField("netBridge", e.target.value);
+                              }}
+                              className="bg-slate-900 border border-slate-800 text-slate-300 rounded-lg px-2 text-xs cursor-pointer hover:bg-slate-800"
+                            >
+                              <option value="">Pré-selecionados...</option>
+                              <option value="br0">Ponte br0</option>
+                              <option value="docker0">Ponte docker0</option>
+                              <option value="eth0">eth0 (Ethernet)</option>
+                              <option value="wlan0">wlan0 (Wi-Fi)</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
+                            Endereço IP Associado (<span className="font-mono">--ip=address</span>)
+                          </label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={(profile.ipAddress === "none" ? "" : profile.ipAddress) || ""}
+                              onChange={(e) => updateField("ipAddress", e.target.value)}
+                              placeholder="Ex: 192.168.1.100, dhcp"
+                              className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                            />
+                            <select
+                              value={profile.ipAddress || ""}
+                              onChange={(e) => updateField("ipAddress", e.target.value)}
+                              className="bg-slate-900 border border-slate-800 text-slate-300 rounded-lg px-2 text-xs cursor-pointer hover:bg-slate-800"
+                            >
+                              <option value="">Atribuição Livre</option>
+                              <option value="dhcp">Clientes DHCP</option>
+                              <option value="191.168.10.22">IP Reservado local</option>
+                              <option value="10.0.0.101">Subrede 10.0.0.x</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* CUSTOM IPS & DNS COMMA PANEL */}
+                    <div className="bg-slate-950/60 p-4 border border-slate-800 rounded-lg space-y-4">
+                      <div>
+                        <h3 className="text-slate-200 text-xs font-bold uppercase tracking-wider pb-1.5 border-b border-slate-900 mb-3 flex justify-between items-center text-emerald-400">
+                          <span>IPs e DNS Personalizados (Campos de Texto)</span>
+                        </h3>
+                        <p className="text-[10px] text-slate-500 mb-3 leading-normal">
+                          Forneça e especifique endereços IP ou servidores DNS diretamente. O assistente formata e aplica os argumentos automaticamente.
+                        </p>
+                      </div>
+
+                      <div className="space-y-3">
+                        {/* Custom IP Input */}
+                        <div>
+                          <label className="block text-[11px] text-slate-400 mb-1">
+                            Endereço IPv4 Personalizado (<span className="font-mono">--ip=</span>)
+                          </label>
+                          <input
+                            type="text"
+                            value={profile.ipAddress || ""}
+                            onChange={(e) => updateField("ipAddress", e.target.value)}
+                            placeholder="Ex: 192.168.1.55 ou dhcp"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                          />
+                        </div>
+
+                        {/* Custom IPv6 Input */}
+                        <div>
+                          <label className="block text-[11px] text-slate-400 mb-1">
+                            Endereço IPv6 Personalizado (<span className="font-mono">--ip6=</span>)
+                          </label>
+                          <input
+                            type="text"
+                            value={profile.ip6Address || ""}
+                            onChange={(e) => updateField("ip6Address", e.target.value)}
+                            placeholder="Ex: 2001:db8:85a3::8a2e:370:7334"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                          />
+                        </div>
+
+                        {/* Batch text input for DNS servers */}
+                        <div>
+                          <label className="block text-[11px] text-slate-400 mb-1">
+                            Servidores DNS (Texto separado por vírgula)
+                          </label>
+                          <input
+                            type="text"
+                            value={(profile.dnsServers || []).join(", ")}
+                            onChange={(e) => {
+                              const dnsList = e.target.value
+                                .split(",")
+                                .map(item => item.trim())
+                                .filter(item => item !== "");
+                              updateField("dnsServers", dnsList);
+                            }}
+                            placeholder="Ex: 1.1.1.1, 8.8.8.8, 9.9.9.9"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Tradicional DNS list / Advanced Networking parameters */}
+                    <div className="bg-slate-950/60 p-4 border border-slate-800 rounded-lg space-y-4">
+                      {/* DNS list view helper */}
+                      <div>
+                        <h3 className="text-slate-200 text-xs font-bold uppercase tracking-wider pb-1.5 border-b border-slate-900 mb-3 flex items-center justify-between">
+                          <span>Lista Ativa de Servidores DNS ({profile.dnsServers?.length || 0})</span>
+                        </h3>
+                        <div className="flex gap-2 mb-2">
+                          <input
+                            type="text"
+                            value={newDns}
+                            onChange={(e) => setNewDns(e.target.value)}
+                            placeholder="Apenas adicionar um (Ex: 8.8.4.4)"
+                            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                            onKeyDown={(e) => e.key === "Enter" && handleAddListItem("dnsServers", profile.dnsServers, newDns, () => setNewDns(""))}
+                          />
                           <button
                             type="button"
-                            onClick={() => handleRemoveListItem("dnsServers", profile.dnsServers, idx)}
-                            className="text-slate-500 hover:text-red-400 ml-1"
+                            onClick={() => handleAddListItem("dnsServers", profile.dnsServers, newDns, () => setNewDns(""))}
+                            className="px-2.5 py-1 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 hover:text-white"
                           >
-                            <Trash2 className="w-3 h-3" />
+                            <Plus className="w-3.5 h-3.5" />
                           </button>
                         </div>
-                      ))}
-                      {(profile.dnsServers || []).length === 0 && (
-                        <span className="text-[11px] text-slate-500 italic block">Herda os servidores DNS do computador host</span>
-                      )}
+                        <div className="space-y-1 max-h-24 overflow-y-auto scrollbar-thin">
+                          {(profile.dnsServers || []).map((dns, idx) => (
+                            <div key={idx} className="flex justify-between items-center bg-slate-900 border border-slate-850 px-2 py-1 rounded text-xs font-mono">
+                              <span className="text-slate-300">{dns}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveListItem("dnsServers", profile.dnsServers, idx)}
+                                className="text-slate-500 hover:text-red-400 ml-1"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                          {(profile.dnsServers || []).length === 0 && (
+                            <span className="text-[11px] text-slate-500 italic block py-4 text-center border border-dashed border-slate-900">
+                              Herda os servidores DNS do computador host
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Advanced Net Params */}
+                      <div className="pt-2 border-t border-slate-900 space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] text-slate-400 mb-0.5 font-bold uppercase">MAC Address:</label>
+                            <input
+                              type="text"
+                              value={profile.macAddress || ""}
+                              onChange={(e) => updateField("macAddress", e.target.value)}
+                              placeholder="00:11:22:33:44:55"
+                              className="w-full bg-slate-950 border border-slate-850 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-slate-400 mb-0.5 font-bold uppercase">Nome Veth:</label>
+                            <input
+                              type="text"
+                              value={profile.vethName || ""}
+                              onChange={(e) => updateField("vethName", e.target.value)}
+                              placeholder="veth0"
+                              className="w-full bg-slate-950 border border-slate-850 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] text-slate-400 mb-0.5 font-bold uppercase">Netmask:</label>
+                            <input
+                              type="text"
+                              value={profile.netmask || ""}
+                              onChange={(e) => updateField("netmask", e.target.value)}
+                              placeholder="255.255.255.0"
+                              className="w-full bg-slate-950 border border-slate-850 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-slate-400 mb-0.5 font-bold uppercase font-sans">MTU:</label>
+                            <input
+                              type="number"
+                              value={profile.mtu || ""}
+                              onChange={(e) => updateField("mtu", e.target.value)}
+                              placeholder="1500"
+                              className="w-full bg-slate-950 border border-slate-850 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            />
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Network parameters */}
-                  <div className="bg-slate-950/60 p-4 border border-slate-800 rounded-lg space-y-3">
-                    <h3 className="text-slate-200 text-xs font-bold uppercase tracking-wider mb-2">
-                      Parâmetros de Rede Avançados
+                  {/* Monitoramento & IP Spoofing block inside IIFE return */}
+                  <div className="border border-slate-800 bg-slate-950/50 p-4 rounded-lg">
+                    <h3 className="text-slate-200 text-xs font-bold uppercase tracking-wider pb-2 border-b border-slate-900 mb-3">
+                      Monitoramento & IP Spoofing
                     </h3>
-                    
-                    <div>
-                      <label className="block text-[11px] text-slate-400 mb-0.5">MAC Address Falso:</label>
-                      <input
-                        type="text"
-                        value={profile.macAddress || ""}
-                        onChange={(e) => updateField("macAddress", e.target.value)}
-                        placeholder="Ex: 00:11:22:33:44:55"
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
-                      />
-                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <label className="flex items-center gap-2 text-slate-300 select-none cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={profile.dnsTrace || false}
+                          onChange={(e) => updateField("dnsTrace", e.target.checked)}
+                          className="rounded border-slate-800 text-emerald-500 focus:ring-emerald-500 bg-slate-950"
+                        />
+                        Monitorar requisições DNS (--dnstrace)
+                      </label>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[11px] text-slate-400 mb-0.5">Nickname Veth:</label>
+                      <label className="flex items-center gap-2 text-slate-300 select-none cursor-pointer">
                         <input
-                          type="text"
-                          value={profile.vethName || ""}
-                          onChange={(e) => updateField("vethName", e.target.value)}
-                          placeholder="veth0"
-                          className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono"
+                          type="checkbox"
+                          checked={profile.netTrace || false}
+                          onChange={(e) => updateField("netTrace", e.target.checked)}
+                          className="rounded border-slate-800 text-emerald-500 focus:ring-emerald-500 bg-slate-950"
                         />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] text-slate-400 mb-0.5">MTU:</label>
+                        Logar pacotes recebidos TCP/UDP (--nettrace)
+                      </label>
+
+                      <label className="flex items-center gap-2 text-slate-300 select-none cursor-pointer">
                         <input
-                          type="number"
-                          value={profile.mtu || ""}
-                          onChange={(e) => updateField("mtu", e.target.value)}
-                          placeholder="1500"
-                          className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          type="checkbox"
+                          checked={profile.netStats || false}
+                          onChange={(e) => updateField("netStats", e.target.checked)}
+                          className="rounded border-slate-800 text-emerald-500 focus:ring-emerald-500 bg-slate-950"
                         />
-                      </div>
+                        Coletar estatísticas de tráfego (--netstats)
+                      </label>
+
+                      <label className="flex items-center gap-2 text-slate-300 select-none cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={profile.hostnameRandomize || false}
+                          onChange={(e) => updateField("hostnameRandomize", e.target.checked)}
+                          className="rounded border-slate-800 text-emerald-500 focus:ring-emerald-500 bg-slate-950"
+                        />
+                        Hostname aleatório na rede (--hostname-randomize)
+                      </label>
                     </div>
                   </div>
                 </div>
-
-                <div className="border border-slate-800 bg-slate-950/50 p-4 rounded-lg">
-                  <h3 className="text-slate-200 text-xs font-bold uppercase tracking-wider pb-2 border-b border-slate-900 mb-3">
-                    Monitoramento & IP Spoofing
-                  </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <label className="flex items-center gap-2 text-slate-300 select-none cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={profile.dnsTrace || false}
-                        onChange={(e) => updateField("dnsTrace", e.target.checked)}
-                        className="rounded border-slate-800 text-emerald-500 focus:ring-emerald-500 bg-slate-950"
-                      />
-                      Monitorar requisições DNS (--dnstrace)
-                    </label>
-
-                    <label className="flex items-center gap-2 text-slate-300 select-none cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={profile.netTrace || false}
-                        onChange={(e) => updateField("netTrace", e.target.checked)}
-                        className="rounded border-slate-800 text-emerald-500 focus:ring-emerald-500 bg-slate-950"
-                      />
-                      Logar pacotes recebidos TCP/UDP (--nettrace)
-                    </label>
-
-                    <label className="flex items-center gap-2 text-slate-300 select-none cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={profile.netStats || false}
-                        onChange={(e) => updateField("netStats", e.target.checked)}
-                        className="rounded border-slate-800 text-emerald-500 focus:ring-emerald-500 bg-slate-950"
-                      />
-                      Coletar estatísticas de tráfego (--netstats)
-                    </label>
-
-                    <label className="flex items-center gap-2 text-slate-300 select-none cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={profile.hostnameRandomize || false}
-                        onChange={(e) => updateField("hostnameRandomize", e.target.checked)}
-                        className="rounded border-slate-800 text-emerald-500 focus:ring-emerald-500 bg-slate-950"
-                      />
-                      Hostname aleatório na rede (--hostname-randomize)
-                    </label>
-                  </div>
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* SECURITY TAB */}
             {activeTab === "security" && (
